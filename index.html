@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шкала отношений · Дневник (Firebase + характеристики)</title>
+    <title>Шкала отношений · Дневник</title>
     <style>
         * {
             margin: 0;
@@ -340,6 +340,22 @@
             cursor: pointer;
             font-size: 0.8rem;
         }
+        @media (max-width: 768px) {
+            .app-container {
+                padding: 1.5rem 1rem;
+            }
+            .diary-form {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .form-group {
+                width: 100%;
+            }
+            .btn {
+                justify-content: center;
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -422,7 +438,7 @@
 <!-- Подключение Firebase SDK -->
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, arrayUnion, arrayRemove, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js";
 
     const firebaseConfig = {
@@ -475,7 +491,6 @@
         return '🚫 Полный разрыв / без контактов';
     }
 
-    // Получить характеристики для конкретного человека из дневника
     function getTraitsForPerson(personName) {
         const traitCount = {};
         diary.forEach(entry => {
@@ -487,7 +502,6 @@
                 traitCount[key].count += entry.impact;
             }
         });
-        // Сортируем по силе
         return Object.values(traitCount).sort((a, b) => b.count - a.count);
     }
 
@@ -510,7 +524,7 @@
             renderAll();
         } catch (error) {
             console.error("Ошибка загрузки:", error);
-            syncStatus.textContent = '❌ Ошибка подключения к Firebase. Работаю оффлайн';
+            syncStatus.textContent = '❌ Ошибка подключения к Firebase';
             people = [];
             diary = [];
             renderAll();
@@ -585,7 +599,6 @@
             nameLabel.textContent = person.name;
             personDiv.appendChild(nameLabel);
 
-            // Колба
             const flask = document.createElement('div');
             flask.className = 'flask-container';
 
@@ -628,19 +641,16 @@
 
             personDiv.appendChild(flask);
 
-            // Статус
             const statusBadge = document.createElement('div');
             statusBadge.className = 'status-badge';
             statusBadge.textContent = getRelationshipStatus(score);
             personDiv.appendChild(statusBadge);
 
-            // Числовое значение
             const scoreSmall = document.createElement('div');
             scoreSmall.className = 'score-value';
             scoreSmall.textContent = `(${score > 0 ? '+' : ''}${score})`;
             personDiv.appendChild(scoreSmall);
 
-            // Характеристики
             const traits = getTraitsForPerson(person.name);
             const traitsContainer = document.createElement('div');
             traitsContainer.className = 'traits-container';
@@ -652,7 +662,6 @@
                 noTraits.textContent = 'нет ярлыков';
                 traitsContainer.appendChild(noTraits);
             } else {
-                // Показываем топ-4 характеристики
                 traits.slice(0, 4).forEach(traitData => {
                     const chip = document.createElement('span');
                     chip.className = `trait-chip ${traitData.type === 'positive' ? 'positive-trait' : 'negative-trait'}`;
@@ -691,7 +700,6 @@
             descSpan.className = 'entry-desc';
             descSpan.textContent = entry.description || 'без описания';
 
-            // Показываем ярлык, если есть
             if (entry.trait) {
                 const traitSpan = document.createElement('span');
                 traitSpan.className = 'entry-trait';
@@ -754,11 +762,9 @@
             return;
         }
 
-        // Обновляем счёт человека
         const delta = type === 'positive' ? impact : -impact;
         people[personIndex].score = clampScore(people[personIndex].score + delta);
 
-        // Добавляем запись с характеристикой
         diary.push({
             person: selectedPerson,
             description: description,
