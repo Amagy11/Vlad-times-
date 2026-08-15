@@ -46,6 +46,9 @@
             color: #8f8fb0;
             margin-top: -1rem;
             margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
         }
         .section {
             background: rgba(12, 12, 20, 0.6);
@@ -363,17 +366,13 @@
     <h1>⚖️ ШКАЛА ОТНОШЕНИЙ</h1>
     <div class="sync-status" id="syncStatus">⏳ Подключение к Firebase...</div>
 
-    <!-- РАЗДЕЛ 1: СТАТИСТИКА (колбы + характеристики) -->
     <div class="section">
         <div class="section-title">
             <span>🧪 Колбы баланса + Характер</span>
         </div>
-        <div id="statsContainer" class="stats-grid">
-            <!-- Динамически заполняется -->
-        </div>
+        <div id="statsContainer" class="stats-grid"></div>
     </div>
 
-    <!-- РАЗДЕЛ 2: ДНЕВНИК -->
     <div class="section">
         <div class="section-title">
             <span>📓 Дневник событий</span>
@@ -429,17 +428,13 @@
             <button class="btn btn-secondary" id="addPersonBtn">👤 + Имя</button>
         </div>
 
-        <div id="diaryEntries" class="diary-entries">
-            <!-- Записи дневника -->
-        </div>
+        <div id="diaryEntries" class="diary-entries"></div>
     </div>
 </div>
 
-<!-- Подключение Firebase SDK -->
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyDe_BVxqwGkqcJKgAzyQJ69SgbRRMmWsLs",
@@ -447,17 +442,13 @@
         projectId: "vlad-time",
         storageBucket: "vlad-time.firebasestorage.app",
         messagingSenderId: "783565854938",
-        appId: "1:783565854938:web:348ce050ed152e4ba22de3",
-        measurementId: "G-5RTT7VDQ6Z"
+        appId: "1:783565854938:web:348ce050ed152e4ba22de3"
     };
 
     const app = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app);
     const db = getFirestore(app);
 
     const syncStatus = document.getElementById('syncStatus');
-
-    // ---------- DOM элементы ----------
     const statsContainer = document.getElementById('statsContainer');
     const personSelect = document.getElementById('personSelect');
     const entryDescription = document.getElementById('entryDescription');
@@ -468,11 +459,9 @@
     const addPersonBtn = document.getElementById('addPersonBtn');
     const diaryEntriesDiv = document.getElementById('diaryEntries');
 
-    // ---------- Состояние ----------
     let people = [];
     let diary = [];
 
-    // ---------- Вспомогательные функции ----------
     function clampScore(score) {
         return Math.max(-100, Math.min(100, score));
     }
@@ -505,26 +494,27 @@
         return Object.values(traitCount).sort((a, b) => b.count - a.count);
     }
 
-    // ---------- Firebase: загрузка и подписка ----------
     const docRef = doc(db, "relationshipData", "main");
 
     async function loadData() {
         try {
+            syncStatus.textContent = '🔄 Загрузка данных...';
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 people = data.people || [];
                 diary = data.diary || [];
+                syncStatus.textContent = '✅ Данные загружены из облака';
             } else {
                 await setDoc(docRef, { people: [], diary: [] });
                 people = [];
                 diary = [];
+                syncStatus.textContent = '✅ База данных создана';
             }
-            syncStatus.textContent = '✅ Данные загружены из облака';
             renderAll();
         } catch (error) {
             console.error("Ошибка загрузки:", error);
-            syncStatus.textContent = '❌ Ошибка подключения к Firebase';
+            syncStatus.textContent = '❌ Ошибка: ' + error.message;
             people = [];
             diary = [];
             renderAll();
@@ -555,11 +545,10 @@
             syncStatus.textContent = '💾 Сохранено в Firebase';
         } catch (error) {
             console.error("Ошибка сохранения:", error);
-            syncStatus.textContent = '❌ Ошибка сохранения';
+            syncStatus.textContent = '❌ Ошибка сохранения: ' + error.message;
         }
     }
 
-    // ---------- Обновление UI ----------
     function updatePersonSelect() {
         const currentValue = personSelect.value;
         personSelect.innerHTML = '';
@@ -736,11 +725,10 @@
         renderDiary();
     }
 
-    // ---------- Обработчики ----------
     addEntryBtn.addEventListener('click', async () => {
         const selectedPerson = personSelect.value;
         if (!selectedPerson) {
-            alert('Сначала добавьте хотя бы одно имя в разделе 1 (кнопка «+ Имя»).');
+            alert('Сначала добавьте хотя бы одно имя.');
             return;
         }
         const description = entryDescription.value.trim();
@@ -758,7 +746,7 @@
 
         const personIndex = people.findIndex(p => p.name === selectedPerson);
         if (personIndex === -1) {
-            alert('Имя не найдено. Обновите список.');
+            alert('Имя не найдено.');
             return;
         }
 
@@ -794,9 +782,10 @@
         renderAll();
     });
 
-    // ---------- Инициализация ----------
-    await loadData();
-    subscribeToFirestore();
+    // Инициализация
+    loadData().then(() => {
+        subscribeToFirestore();
+    });
 </script>
 </body>
 </html>
