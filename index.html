@@ -463,29 +463,31 @@
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { 
-        getFirestore, 
-        doc, 
-        getDoc, 
-        setDoc, 
-        updateDoc, 
-        onSnapshot,
+        getDatabase, 
+        ref, 
+        get, 
+        set, 
+        update, 
+        onValue,
         serverTimestamp 
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-    // Firebase конфигурация
+    // Firebase конфигурация с Realtime Database
     const firebaseConfig = {
         apiKey: "AIzaSyDe_BVxqwGkqcJKgAzyQJ69SgbRRMmWsLs",
         authDomain: "vlad-time.firebaseapp.com",
+        databaseURL: "https://vlad-time-default-rtdb.firebaseio.com",
         projectId: "vlad-time",
         storageBucket: "vlad-time.firebasestorage.app",
         messagingSenderId: "783565854938",
-        appId: "1:783565854938:web:522a080a51e6090aa22de3",
-        measurementId: "G-6MWET3D1L9"
+        appId: "1:783565854938:web:348ce050ed152e4ba22de3",
+        measurementId: "G-5RTT7VDQ6Z"
     };
 
     // Инициализация Firebase
     const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    const db = getDatabase(app);
+    const dataRef = ref(db, 'relationshipData');
 
     // DOM элементы
     const syncStatus = document.getElementById('syncStatus');
@@ -502,11 +504,6 @@
     // Данные
     let people = [];
     let diary = [];
-    let isLocalChange = false; // Флаг для предотвращения циклов
-    let saveTimeout = null; // Для debounce сохранений
-
-    // Ссылка на документ в Firestore
-    const docRef = doc(db, "relationshipData", "main");
 
     // Вспомогательные функции
     function clampScore(score) {
@@ -541,74 +538,62 @@
         return Object.values(traitCount).sort((a, b) => b.count - a.count);
     }
 
-    // Функция сохранения с debounce
+    // Сохранение данных в Realtime Database
     async function saveData() {
-        if (isLocalChange) return; // Не сохраняем, если изменение пришло из Firestore
-        
-        if (saveTimeout) {
-            clearTimeout(saveTimeout);
+        try {
+            syncStatus.textContent = '💾 Сохранение...';
+            await set(dataRef, {
+                people: people,
+                diary: diary,
+                lastUpdated: serverTimestamp()
+            });
+            syncStatus.textContent = '✅ Сохранено в Firebase';
+        } catch (error) {
+            console.error("Ошибка сохранения:", error);
+            syncStatus.textContent = '❌ Ошибка сохранения: ' + error.message;
         }
-        
-        saveTimeout = setTimeout(async () => {
-            try {
-                syncStatus.textContent = '💾 Сохранение...';
-                await updateDoc(docRef, {
-                    people: people,
-                    diary: diary,
-                    lastUpdated: serverTimestamp()
-                });
-                syncStatus.textContent = '✅ Сохранено в Firebase';
-            } catch (error) {
-                console.error("Ошибка сохранения:", error);
-                syncStatus.textContent = '❌ Ошибка сохранения: ' + error.message;
-            }
-        }, 500); // Задержка 500мс для debounce
     }
 
-    // Инициализация и подписка на изменения
-    async function initFirebase() {
+    // Загрузка данных из Realtime Database
+    async function loadData() {
         try {
-            syncStatus.textContent = '🔄 Подключение к Firebase...';
-            
-            // Проверяем существование документа
-            const docSnap = await getDoc(docRef);
-            if (!docSnap.exists()) {
-                // Создаем документ, если его нет
-                await setDoc(docRef, {
-                    people: [],
-                    diary: [],
-                    createdAt: serverTimestamp(),
-                    lastUpdated: serverTimestamp()
-                });
-                syncStatus.textContent = '✅ База данных создана';
+            syncStatus.textContent = '🔄 Загрузка данных...';
+            const snapshot = await get(dataRef);
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                people = data.people || [];
+                diary = data.diary || [];
+                syncStatus.textContent = '✅ Данные загружены';
+                renderAll();
             } else {
-                syncStatus.textContent = '✅ Подключено к Firebase';
+                syncStatus.textContent = '📝 База данных пуста';
+                people = [];
+                diary = [];
+                renderAll();
             }
-            
-            // Подписываемся на изменения в реальном времени
-            onSnapshot(docRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const data = snapshot.data();
-                    isLocalChange = true;
-                    people = data.people || [];
-                    diary = data.diary || [];
-                    renderAll();
-                    syncStatus.textContent = '🔄 Синхронизировано с облаком';
-                    isLocalChange = false;
-                }
-            }, (error) => {
-                console.error("Ошибка подписки:", error);
-                syncStatus.textContent = '⚠️ Ошибка синхронизации: ' + error.message;
-            });
-            
         } catch (error) {
-            console.error("Ошибка инициализации:", error);
+            console.error("Ошибка загрузки:", error);
             syncStatus.textContent = '❌ Ошибка: ' + error.message;
-            // Загружаем пустые данные при ошибке
             people = [];
             diary = [];
             renderAll();
         }
+    }
+
+    // Подписка на изменения в реальном времени
+    function subscribeToUpdates() {
+        onValue(dataRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                people = data.people || [];
+                diary = data.diary || [];
+                renderAll();
+                syncStatus.textContent = '🔄 Синхронизировано';
+            }
+        }, (error) => {
+            console.error("Ошибка подписки:", error);
+            syncStatus.textContent = '⚠️ Ошибка синхронизации';
+        });
     }
 
     function updatePersonSelect() {
@@ -634,7 +619,7 @@
         
         if (people.some(p => p.name === currentValue)) {
             personSelect.value = currentValue;
-        } else {
+        } else if (people.length > 0) {
             personSelect.value = people[0].name;
         }
     }
@@ -650,7 +635,6 @@
             const personDiv = document.createElement('div');
             personDiv.className = 'person-card';
             
-            // Кнопка удаления
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'delete-person-btn';
             deleteBtn.textContent = '✖';
@@ -785,7 +769,6 @@
             
             const originalIndex = diary.length - 1 - index;
             removeBtn.addEventListener('click', async () => {
-                // Отменяем влияние записи на счёт
                 const entryToRemove = diary[originalIndex];
                 const personIndex = people.findIndex(p => p.name === entryToRemove.person);
                 if (personIndex !== -1) {
@@ -890,8 +873,10 @@
         renderAll();
     });
 
-    // Инициализация приложения
-    initFirebase();
+    // Инициализация
+    loadData().then(() => {
+        subscribeToUpdates();
+    });
 </script>
 </body>
 </html>
