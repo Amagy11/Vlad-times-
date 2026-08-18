@@ -84,10 +84,32 @@
             border-radius: 1.5rem;
             padding: 1rem 0.8rem;
             transition: all 0.3s;
+            position: relative;
         }
         .person-card:hover {
             background: rgba(0,0,0,0.35);
             transform: translateY(-3px);
+        }
+        .delete-person-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(220, 20, 60, 0.3);
+            border: 1px solid #dc143c;
+            color: #ffbaba;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .delete-person-btn:hover {
+            background: rgba(220, 20, 60, 0.6);
+            transform: scale(1.1);
         }
         .name-label {
             font-weight: 700;
@@ -98,6 +120,7 @@
             text-shadow: 0 1px 3px black;
             word-break: break-word;
             text-align: center;
+            margin-top: 10px;
         }
         .flask-container {
             position: relative;
@@ -342,6 +365,11 @@
             padding: 0.25rem 0.8rem;
             cursor: pointer;
             font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+        .remove-btn:hover {
+            background: rgba(220, 20, 60, 0.2);
+            transform: scale(1.05);
         }
         @media (max-width: 768px) {
             .app-container {
@@ -434,20 +462,32 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { 
+        getFirestore, 
+        doc, 
+        getDoc, 
+        setDoc, 
+        updateDoc, 
+        onSnapshot,
+        serverTimestamp 
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+    // Firebase конфигурация
     const firebaseConfig = {
         apiKey: "AIzaSyDe_BVxqwGkqcJKgAzyQJ69SgbRRMmWsLs",
         authDomain: "vlad-time.firebaseapp.com",
         projectId: "vlad-time",
         storageBucket: "vlad-time.firebasestorage.app",
         messagingSenderId: "783565854938",
-        appId: "1:783565854938:web:348ce050ed152e4ba22de3"
+        appId: "1:783565854938:web:522a080a51e6090aa22de3",
+        measurementId: "G-6MWET3D1L9"
     };
 
+    // Инициализация Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
+    // DOM элементы
     const syncStatus = document.getElementById('syncStatus');
     const statsContainer = document.getElementById('statsContainer');
     const personSelect = document.getElementById('personSelect');
@@ -459,9 +499,16 @@
     const addPersonBtn = document.getElementById('addPersonBtn');
     const diaryEntriesDiv = document.getElementById('diaryEntries');
 
+    // Данные
     let people = [];
     let diary = [];
+    let isLocalChange = false; // Флаг для предотвращения циклов
+    let saveTimeout = null; // Для debounce сохранений
 
+    // Ссылка на документ в Firestore
+    const docRef = doc(db, "relationshipData", "main");
+
+    // Вспомогательные функции
     function clampScore(score) {
         return Math.max(-100, Math.min(100, score));
     }
@@ -494,75 +541,80 @@
         return Object.values(traitCount).sort((a, b) => b.count - a.count);
     }
 
-    const docRef = doc(db, "relationshipData", "main");
-
-    async function loadData() {
-        try {
-            syncStatus.textContent = '🔄 Загрузка данных...';
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                people = data.people || [];
-                diary = data.diary || [];
-                syncStatus.textContent = '✅ Данные загружены из облака';
-            } else {
-                await setDoc(docRef, { people: [], diary: [] });
-                people = [];
-                diary = [];
-                syncStatus.textContent = '✅ База данных создана';
+    // Функция сохранения с debounce
+    async function saveData() {
+        if (isLocalChange) return; // Не сохраняем, если изменение пришло из Firestore
+        
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+        }
+        
+        saveTimeout = setTimeout(async () => {
+            try {
+                syncStatus.textContent = '💾 Сохранение...';
+                await updateDoc(docRef, {
+                    people: people,
+                    diary: diary,
+                    lastUpdated: serverTimestamp()
+                });
+                syncStatus.textContent = '✅ Сохранено в Firebase';
+            } catch (error) {
+                console.error("Ошибка сохранения:", error);
+                syncStatus.textContent = '❌ Ошибка сохранения: ' + error.message;
             }
-            renderAll();
+        }, 500); // Задержка 500мс для debounce
+    }
+
+    // Инициализация и подписка на изменения
+    async function initFirebase() {
+        try {
+            syncStatus.textContent = '🔄 Подключение к Firebase...';
+            
+            // Проверяем существование документа
+            const docSnap = await getDoc(docRef);
+            if (!docSnap.exists()) {
+                // Создаем документ, если его нет
+                await setDoc(docRef, {
+                    people: [],
+                    diary: [],
+                    createdAt: serverTimestamp(),
+                    lastUpdated: serverTimestamp()
+                });
+                syncStatus.textContent = '✅ База данных создана';
+            } else {
+                syncStatus.textContent = '✅ Подключено к Firebase';
+            }
+            
+            // Подписываемся на изменения в реальном времени
+            onSnapshot(docRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.data();
+                    isLocalChange = true;
+                    people = data.people || [];
+                    diary = data.diary || [];
+                    renderAll();
+                    syncStatus.textContent = '🔄 Синхронизировано с облаком';
+                    isLocalChange = false;
+                }
+            }, (error) => {
+                console.error("Ошибка подписки:", error);
+                syncStatus.textContent = '⚠️ Ошибка синхронизации: ' + error.message;
+            });
+            
         } catch (error) {
-            console.error("Ошибка загрузки:", error);
+            console.error("Ошибка инициализации:", error);
             syncStatus.textContent = '❌ Ошибка: ' + error.message;
+            // Загружаем пустые данные при ошибке
             people = [];
             diary = [];
             renderAll();
         }
     }
 
-    function subscribeToFirestore() {
-        onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                people = data.people || [];
-                diary = data.diary || [];
-                renderAll();
-                syncStatus.textContent = '🔄 Синхронизировано с облаком';
-            }
-        }, (error) => {
-            console.error("Ошибка подписки:", error);
-            syncStatus.textContent = '⚠️ Подписка не работает';
-        });
-    }
-
-    async function savePeopleAndDiary() {
-        try {
-            await updateDoc(docRef, {
-                people: people,
-                diary: diary
-            });
-            syncStatus.textContent = '💾 Сохранено в Firebase';
-        } catch (error) {
-            console.error("Ошибка сохранения:", error);
-            syncStatus.textContent = '❌ Ошибка сохранения: ' + error.message;
-        }
-    }
-
     function updatePersonSelect() {
         const currentValue = personSelect.value;
         personSelect.innerHTML = '';
-        people.forEach(person => {
-            const option = document.createElement('option');
-            option.value = person.name;
-            option.textContent = `${person.name} (${person.score})`;
-            personSelect.appendChild(option);
-        });
-        if (people.some(p => p.name === currentValue)) {
-            personSelect.value = currentValue;
-        } else if (people.length > 0) {
-            personSelect.value = people[0].name;
-        }
+        
         if (people.length === 0) {
             const emptyOption = document.createElement('option');
             emptyOption.value = '';
@@ -570,6 +622,20 @@
             emptyOption.disabled = true;
             emptyOption.selected = true;
             personSelect.appendChild(emptyOption);
+            return;
+        }
+        
+        people.forEach(person => {
+            const option = document.createElement('option');
+            option.value = person.name;
+            option.textContent = `${person.name} (${person.score})`;
+            personSelect.appendChild(option);
+        });
+        
+        if (people.some(p => p.name === currentValue)) {
+            personSelect.value = currentValue;
+        } else {
+            personSelect.value = people[0].name;
         }
     }
 
@@ -579,33 +645,50 @@
             statsContainer.innerHTML = '<div class="empty-stats-message">👥 Пока нет ни одного имени.<br>Нажмите «+ Имя» ниже, чтобы добавить.</div>';
             return;
         }
+        
         people.forEach(person => {
             const personDiv = document.createElement('div');
             personDiv.className = 'person-card';
-
+            
+            // Кнопка удаления
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-person-btn';
+            deleteBtn.textContent = '✖';
+            deleteBtn.title = 'Удалить человека';
+            deleteBtn.addEventListener('click', async () => {
+                if (confirm(`Удалить "${person.name}" и все записи о нём?`)) {
+                    people = people.filter(p => p.name !== person.name);
+                    diary = diary.filter(entry => entry.person !== person.name);
+                    await saveData();
+                    renderAll();
+                }
+            });
+            personDiv.appendChild(deleteBtn);
+            
             const nameLabel = document.createElement('div');
             nameLabel.className = 'name-label';
             nameLabel.textContent = person.name;
             personDiv.appendChild(nameLabel);
-
+            
             const flask = document.createElement('div');
             flask.className = 'flask-container';
-
+            
             const top = document.createElement('div');
             top.className = 'flask-top';
             flask.appendChild(top);
-
+            
             const fillArea = document.createElement('div');
             fillArea.className = 'fill-area';
             flask.appendChild(fillArea);
-
+            
             const neutralMarker = document.createElement('div');
             neutralMarker.className = 'neutral-marker';
             fillArea.appendChild(neutralMarker);
-
+            
             const score = clampScore(person.score);
             let greenPercent = 0;
             let redPercent = 0;
+            
             if (score >= 0) {
                 greenPercent = score;
                 redPercent = 0;
@@ -613,37 +696,37 @@
                 redPercent = Math.abs(score);
                 greenPercent = 0;
             }
-
+            
             const greenFill = document.createElement('div');
             greenFill.className = 'green-fill';
             greenFill.style.height = `${greenPercent}%`;
             greenFill.style.width = '100%';
             greenFill.style.alignSelf = 'flex-start';
             fillArea.appendChild(greenFill);
-
+            
             const redFill = document.createElement('div');
             redFill.className = 'red-fill';
             redFill.style.height = `${redPercent}%`;
             redFill.style.width = '100%';
             redFill.style.alignSelf = 'flex-end';
             fillArea.appendChild(redFill);
-
+            
             personDiv.appendChild(flask);
-
+            
             const statusBadge = document.createElement('div');
             statusBadge.className = 'status-badge';
             statusBadge.textContent = getRelationshipStatus(score);
             personDiv.appendChild(statusBadge);
-
+            
             const scoreSmall = document.createElement('div');
             scoreSmall.className = 'score-value';
             scoreSmall.textContent = `(${score > 0 ? '+' : ''}${score})`;
             personDiv.appendChild(scoreSmall);
-
+            
             const traits = getTraitsForPerson(person.name);
             const traitsContainer = document.createElement('div');
             traitsContainer.className = 'traits-container';
-
+            
             if (traits.length === 0) {
                 const noTraits = document.createElement('span');
                 noTraits.style.fontSize = '0.7rem';
@@ -665,7 +748,7 @@
                 }
             }
             personDiv.appendChild(traitsContainer);
-
+            
             statsContainer.appendChild(personDiv);
         });
     }
@@ -676,43 +759,55 @@
             diaryEntriesDiv.innerHTML = '<div class="empty-message">📭 В дневнике пока пусто. Добавьте первую запись.</div>';
             return;
         }
+        
         const reversedDiary = [...diary].reverse();
         reversedDiary.forEach((entry, index) => {
             const entryDiv = document.createElement('div');
             entryDiv.className = `entry ${entry.type}`;
-
+            
             const personSpan = document.createElement('span');
             personSpan.className = 'entry-person';
             personSpan.textContent = entry.person;
-
+            
             const descSpan = document.createElement('span');
             descSpan.className = 'entry-desc';
             descSpan.textContent = entry.description || 'без описания';
-
+            
+            const impactSpan = document.createElement('span');
+            impactSpan.className = 'entry-impact';
+            const sign = entry.type === 'positive' ? '+' : '-';
+            impactSpan.textContent = `${sign}${entry.impact}`;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-btn';
+            removeBtn.textContent = '✖';
+            removeBtn.title = 'Удалить запись';
+            
+            const originalIndex = diary.length - 1 - index;
+            removeBtn.addEventListener('click', async () => {
+                // Отменяем влияние записи на счёт
+                const entryToRemove = diary[originalIndex];
+                const personIndex = people.findIndex(p => p.name === entryToRemove.person);
+                if (personIndex !== -1) {
+                    const delta = entryToRemove.type === 'positive' ? entryToRemove.impact : -entryToRemove.impact;
+                    people[personIndex].score = clampScore(people[personIndex].score - delta);
+                }
+                
+                diary.splice(originalIndex, 1);
+                await saveData();
+                renderAll();
+            });
+            
+            entryDiv.appendChild(personSpan);
+            entryDiv.appendChild(descSpan);
+            
             if (entry.trait) {
                 const traitSpan = document.createElement('span');
                 traitSpan.className = 'entry-trait';
                 traitSpan.textContent = entry.trait;
                 entryDiv.appendChild(traitSpan);
             }
-
-            const impactSpan = document.createElement('span');
-            impactSpan.className = 'entry-impact';
-            const sign = entry.type === 'positive' ? '+' : '-';
-            impactSpan.textContent = `${sign}${entry.impact}`;
-
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'remove-btn';
-            removeBtn.textContent = '✖';
-            const originalIndex = diary.length - 1 - index;
-            removeBtn.addEventListener('click', async () => {
-                diary.splice(originalIndex, 1);
-                await savePeopleAndDiary();
-                renderAll();
-            });
-
-            entryDiv.appendChild(personSpan);
-            entryDiv.appendChild(descSpan);
+            
             entryDiv.appendChild(impactSpan);
             entryDiv.appendChild(removeBtn);
             diaryEntriesDiv.appendChild(entryDiv);
@@ -725,67 +820,78 @@
         renderDiary();
     }
 
+    // Обработчики событий
     addEntryBtn.addEventListener('click', async () => {
         const selectedPerson = personSelect.value;
         if (!selectedPerson) {
             alert('Сначала добавьте хотя бы одно имя.');
             return;
         }
+        
         const description = entryDescription.value.trim();
         if (!description) {
             alert('Введите описание события.');
             return;
         }
+        
         const type = entryType.value;
         const impact = parseInt(entryImpact.value, 10);
         if (isNaN(impact) || impact < 1 || impact > 10) {
             alert('Сила должна быть от 1 до 10.');
             return;
         }
+        
         const trait = entryTrait.value;
-
+        
         const personIndex = people.findIndex(p => p.name === selectedPerson);
         if (personIndex === -1) {
             alert('Имя не найдено.');
             return;
         }
-
+        
         const delta = type === 'positive' ? impact : -impact;
         people[personIndex].score = clampScore(people[personIndex].score + delta);
-
+        
         diary.push({
             person: selectedPerson,
             description: description,
             type: type,
             impact: impact,
-            trait: trait || null
+            trait: trait || null,
+            timestamp: new Date().toISOString()
         });
-
+        
         entryDescription.value = '';
         entryTrait.value = '';
-
-        await savePeopleAndDiary();
+        
+        await saveData();
         renderAll();
     });
 
     addPersonBtn.addEventListener('click', async () => {
         const newName = prompt('Введите имя нового человека:');
         if (!newName) return;
+        
         const trimmedName = newName.trim();
         if (!trimmedName) return;
+        
         if (people.some(p => p.name.toLowerCase() === trimmedName.toLowerCase())) {
             alert('Такое имя уже существует.');
             return;
         }
-        people.push({ name: trimmedName, score: 0 });
-        await savePeopleAndDiary();
+        
+        people.push({ 
+            name: trimmedName, 
+            score: 0,
+            createdAt: new Date().toISOString()
+        });
+        
+        await saveData();
         renderAll();
     });
 
-    // Инициализация
-    loadData().then(() => {
-        subscribeToFirestore();
-    });
+    // Инициализация приложения
+    initFirebase();
 </script>
 </body>
 </html>
